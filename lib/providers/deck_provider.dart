@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../models/deck.dart';
-import '../services/firestore_service.dart'; // ← đổi import
+import '../services/firestore_service.dart';
 
 class DeckProvider with ChangeNotifier {
   final FirestoreService _db = FirestoreService(); // ← đổi service

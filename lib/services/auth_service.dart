@@ -38,6 +38,44 @@ class AuthService {
     }
   }
 
+  // ─── Email / Password Sign-In ─────────────────────────────────────────────────
+  Future<User?> signInWithEmail(String email, String password) async {
+    try {
+      final userCredential = await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      return userCredential.user;
+    } catch (e) {
+      debugPrint('[AuthService] signInWithEmail error: $e');
+      rethrow;
+    }
+  }
+
+  // ─── Email / Password Register ────────────────────────────────────────────────
+  Future<User?> registerWithEmail(String email, String password) async {
+    try {
+      final userCredential = await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      return userCredential.user;
+    } catch (e) {
+      debugPrint('[AuthService] registerWithEmail error: $e');
+      rethrow;
+    }
+  }
+
+  // ─── Password Reset ───────────────────────────────────────────────────────────
+  Future<void> sendPasswordReset(String email) async {
+    try {
+      await _auth.sendPasswordResetEmail(email: email);
+    } catch (e) {
+      debugPrint('[AuthService] sendPasswordReset error: $e');
+      rethrow;
+    }
+  }
+
   /// Đăng xuất
   Future<void> signOut() async {
     try {

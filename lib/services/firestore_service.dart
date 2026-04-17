@@ -3,6 +3,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import '../models/deck.dart';
 import '../models/flashcard.dart';
+import '../models/user_model.dart';
+import '../models/study_log.dart';
+import '../data/default_decks.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -10,22 +13,171 @@ class FirestoreService {
 
   // ── Helpers ────────────────────────────────────────────
 
-  /// Collection decks của user hiện tại
-  CollectionReference<Map<String, dynamic>> get _decksRef {
-    final uid = _auth.currentUser!.uid;
-    return _db.collection('users').doc(uid).collection('decks');
+  String get _uid => _auth.currentUser!.uid;
+  String get uid => _uid;
+
+  DocumentReference<Map<String, dynamic>> get _userDoc =>
+      _db.collection('users').doc(_uid);
+
+  CollectionReference<Map<String, dynamic>> get _decksRef =>
+      _userDoc.collection('decks');
+
+  CollectionReference<Map<String, dynamic>> _cardsRef(String deckId) =>
+      _decksRef.doc(deckId).collection('flashcards');
+
+  CollectionReference<Map<String, dynamic>> get _studyLogsRef =>
+      _db.collection('study_logs');
+
+  // ── USER / STREAK ──────────────────────────────────────
+
+  /// Lấy thông tin user — tạo document nếu chưa có.
+  /// Seed bộ thẻ hệ thống SAU khi tạo xong (tránh race condition).
+  Future<UserModel> getOrCreateUser() async {
+    try {
+      final doc = await _userDoc.get();
+
+      if (doc.exists) {
+        // Seed nếu flag chưa true — set flag SAU khi seed thành công
+        if (doc.data()?['defaultDecksSeeded'] != true) {
+          await seedDefaultDecks();
+          await _userDoc.update({'defaultDecksSeeded': true});
+        }
+        return UserModel.fromFirestore(doc);
+      }
+
+      // User mới → tạo document với seeded = false trước
+      final fbUser = _auth.currentUser!;
+      final newUser = UserModel(
+        uid: _uid,
+        email: fbUser.email,
+        displayName: fbUser.displayName,
+        photoUrl: fbUser.photoURL,
+        streakDays: 0,
+        longestStreak: 0,
+        lastStudyDate: null,
+        createdAt: DateTime.now(),
+      );
+      await _userDoc.set({
+        ...newUser.toFirestore(),
+        'defaultDecksSeeded': false, // false trước — set true sau khi seed xong
+      });
+      await seedDefaultDecks();
+      await _userDoc.update({'defaultDecksSeeded': true});
+      debugPrint('✅ New user created + seeded: $_uid');
+      return newUser;
+    } catch (e) {
+      debugPrint('❌ getOrCreateUser error: $e');
+      rethrow;
+    }
   }
 
-  /// Collection flashcards trong 1 deck
-  CollectionReference<Map<String, dynamic>> _cardsRef(String deckId) {
-    final uid = _auth.currentUser!.uid;
-    return _db
-        .collection('users')
-        .doc(uid)
-        .collection('decks')
-        .doc(deckId)
-        .collection('flashcards');
+  // ── SEED DEFAULT DECKS ─────────────────────────────────
+
+  /// Tạo các bộ thẻ hệ thống (isSystem = true).
+  /// Chỉ được gọi khi defaultDecksSeeded != true.
+  Future<void> seedDefaultDecks() async {
+    try {
+      for (final deckData in kDefaultDecks) {
+        final deck = Deck(
+          name: deckData.name,
+          description: deckData.description,
+          color: deckData.color,
+          cardCount: deckData.cards.length,
+          isSystem: true,
+        );
+        final deckRef = await _decksRef.add(deck.toFirestore());
+
+        final batch = _db.batch();
+        final todayStr = DateTime.now().toIso8601String().substring(0, 10);
+
+        for (final cardData in deckData.cards) {
+          final cardRef = _cardsRef(deckRef.id).doc();
+          batch.set(cardRef, {
+            'front': cardData.front,
+            'back': cardData.back,
+            'pronunciation': cardData.pronunciation,
+            'example': cardData.example,
+            'deckId': deckRef.id,
+            'easeFactor': 2.5,
+            'interval': 0,
+            'repetitions': 0,
+            'nextReview': todayStr,
+            'reviewCount': 0,
+            'isLearned': false,
+            'createdAt': Timestamp.fromDate(DateTime.now()),
+          });
+        }
+        await batch.commit();
+        debugPrint(
+          '✅ Seeded deck "${deckData.name}" (${deckData.cards.length} cards)',
+        );
+      }
+      debugPrint('✅ All default decks seeded successfully');
+    } catch (e) {
+      debugPrint('❌ seedDefaultDecks error: $e');
+      // Không rethrow — seed thất bại không block user
+    }
   }
+
+  // ── STREAK ─────────────────────────────────────────────
+
+  Future<UserModel> updateStreak() async {
+    try {
+      final doc = await _userDoc.get();
+      final user = doc.exists
+          ? UserModel.fromFirestore(doc)
+          : await getOrCreateUser();
+
+      final today = _dateOnly(DateTime.now());
+      final lastDate = user.lastStudyDate != null
+          ? _dateOnly(user.lastStudyDate!)
+          : null;
+
+      if (lastDate != null && lastDate == today) {
+        debugPrint('✅ Streak: đã học hôm nay, giữ nguyên ${user.streakDays}');
+        return user;
+      }
+
+      final yesterday = today.subtract(const Duration(days: 1));
+      int newStreak;
+
+      if (lastDate == null) {
+        newStreak = 1;
+      } else if (lastDate == yesterday) {
+        newStreak = user.streakDays + 1;
+      } else {
+        newStreak = 1;
+      }
+
+      final newLongest = newStreak > user.longestStreak
+          ? newStreak
+          : user.longestStreak;
+
+      await _userDoc.update({
+        'chuoiNgayHoc': newStreak,
+        'chuoiDaiNhat': newLongest,
+        'ngayHocGanNhat': Timestamp.fromDate(today),
+      });
+
+      debugPrint('✅ Streak updated: $newStreak ngày (best: $newLongest)');
+
+      return UserModel(
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName,
+        photoUrl: user.photoUrl,
+        streakDays: newStreak,
+        longestStreak: newLongest,
+        lastStudyDate: today,
+        createdAt: user.createdAt,
+      );
+    } catch (e) {
+      debugPrint('❌ updateStreak error: $e');
+      rethrow;
+    }
+  }
+
+  DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
 
   // ── DECK ───────────────────────────────────────────────
 
@@ -39,10 +191,11 @@ class FirestoreService {
           .map((doc) => Deck.fromFirestore(doc))
           .toList();
 
-      // Tính dueCount cho mỗi deck
+      final dueLists = await Future.wait(
+        decks.map((d) => getDueCardsByDeck(d.id!)),
+      );
       for (int i = 0; i < decks.length; i++) {
-        final due = await getDueCardsByDeck(decks[i].id!);
-        decks[i] = decks[i].copyWith(dueCount: due.length);
+        decks[i] = decks[i].copyWith(dueCount: dueLists[i].length);
       }
 
       return decks;
@@ -52,7 +205,6 @@ class FirestoreService {
     }
   }
 
-  /// Trả về String id của document vừa tạo
   Future<String> insertDeck(Deck deck) async {
     try {
       final docRef = await _decksRef.add(deck.toFirestore());
@@ -73,17 +225,14 @@ class FirestoreService {
     }
   }
 
-  /// Xoá deck + toàn bộ flashcards bên trong (batch write)
   Future<void> deleteDeck(String id) async {
     try {
       final cardsSnapshot = await _cardsRef(id).get();
       final batch = _db.batch();
-
       for (final doc in cardsSnapshot.docs) {
         batch.delete(doc.reference);
       }
       batch.delete(_decksRef.doc(id));
-
       await batch.commit();
       debugPrint('✅ deleteDeck: $id (${cardsSnapshot.size} cards removed)');
     } catch (e) {
@@ -106,7 +255,6 @@ class FirestoreService {
     }
   }
 
-  /// Lấy thẻ đến hạn ôn hôm nay (nextReview <= today)
   Future<List<Flashcard>> getDueCardsByDeck(String deckId) async {
     try {
       final today = DateTime.now().toIso8601String().substring(0, 10);
@@ -123,7 +271,6 @@ class FirestoreService {
   Future<String> insertFlashcard(Flashcard card) async {
     try {
       final docRef = await _cardsRef(card.deckId).add(card.toFirestore());
-      // Tăng cardCount của deck
       await _decksRef.doc(card.deckId).update({
         'cardCount': FieldValue.increment(1),
       });
@@ -147,13 +294,45 @@ class FirestoreService {
   Future<void> deleteFlashcard(String id, String deckId) async {
     try {
       await _cardsRef(deckId).doc(id).delete();
-      // Giảm cardCount của deck
       await _decksRef.doc(deckId).update({
         'cardCount': FieldValue.increment(-1),
       });
     } catch (e) {
       debugPrint('❌ deleteFlashcard error: $e');
       rethrow;
+    }
+  }
+
+  // ── STUDY LOG ──────────────────────────────────────────
+
+  Future<void> insertStudyLog(StudyLog log) async {
+    try {
+      await _studyLogsRef.add(log.toFirestore());
+      debugPrint('✅ insertStudyLog: ${log.cardId} rated ${log.rating}');
+    } catch (e) {
+      debugPrint('❌ insertStudyLog error: $e');
+    }
+  }
+
+  Future<List<StudyLog>> getStudyLogs({int? lastNDays}) async {
+    try {
+      Query<Map<String, dynamic>> query = _studyLogsRef
+          .where('maNguoiDung', isEqualTo: _uid)
+          .orderBy('thoiGianHoc', descending: true);
+
+      if (lastNDays != null) {
+        final since = DateTime.now().subtract(Duration(days: lastNDays));
+        query = query.where(
+          'thoiGianHoc',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(since),
+        );
+      }
+
+      final snapshot = await query.get();
+      return snapshot.docs.map((d) => StudyLog.fromFirestore(d)).toList();
+    } catch (e) {
+      debugPrint('❌ getStudyLogs error: $e');
+      return [];
     }
   }
 }

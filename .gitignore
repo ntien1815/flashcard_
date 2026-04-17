@@ -50,3 +50,15 @@ lib/firebase_options.dart
 # Build logs
 build_log.txt
 google-services.json
+
+.env
+
+# Claude Code
+.claude/
+
+# Android build artifacts
+android/app/build/
+android/build/
+
+# DevTools
+devtools_options.yaml
