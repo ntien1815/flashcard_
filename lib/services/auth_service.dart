@@ -15,23 +15,37 @@ class AuthService {
   /// Đăng nhập bằng Google
   Future<UserCredential?> signInWithGoogle() async {
     try {
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) {
-        debugPrint('⚠️ User cancelled Google Sign-In');
-        return null; // User tự bấm cancel
+      if (kIsWeb) {
+        // Web: dùng popup của Firebase Auth với clientId
+        final googleProvider = GoogleAuthProvider()
+          ..addScope('email')
+          ..addScope('profile')
+          ..setCustomParameters({
+            'client_id': '1098731028631-bg6848gkv9728mdem3ma0vsh1ruipgor.apps.googleusercontent.com',
+          });
+        final userCredential = await _auth.signInWithPopup(googleProvider);
+        debugPrint('✅ Signed in (web): ${userCredential.user?.email}');
+        return userCredential;
+      } else {
+        // Mobile: dùng google_sign_in native flow
+        final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+        if (googleUser == null) {
+          debugPrint('⚠️ User cancelled Google Sign-In');
+          return null;
+        }
+
+        final GoogleSignInAuthentication googleAuth =
+            await googleUser.authentication;
+
+        final credential = GoogleAuthProvider.credential(
+          accessToken: googleAuth.accessToken,
+          idToken: googleAuth.idToken,
+        );
+
+        final userCredential = await _auth.signInWithCredential(credential);
+        debugPrint('✅ Signed in: ${userCredential.user?.email}');
+        return userCredential;
       }
-
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
-
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-
-      final userCredential = await _auth.signInWithCredential(credential);
-      debugPrint('✅ Signed in: ${userCredential.user?.email}');
-      return userCredential;
     } catch (e) {
       debugPrint('❌ signInWithGoogle error: $e');
       rethrow;
