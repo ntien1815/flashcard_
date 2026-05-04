@@ -4,12 +4,6 @@
 
 ---
 
-## Cập nhật gần đây (Recent Updates)
-- Tối ưu hoá mã nguồn, loại bỏ các hàm `legacy` không còn sử dụng.
-- Dọn dẹp code thừa trong các class Model và Provider để đảm bảo tính gọn nhẹ, duy trì độ ổn định.
-
----
-
 ## Tính năng chính
 
 ### Xác thực
@@ -153,7 +147,6 @@ flutter run
 | `shared_preferences` | ^2.2.2 | Lưu cài đặt local |
 | `intl` | ^0.19.0 | Định dạng ngày giờ |
 | `uuid` | ^4.2.1 | Tạo ID duy nhất |
-| `sqflite` | ^2.3.0 | SQLite local |
 | `csv` | ^7.2.0 | Import/export CSV |
 | `file_picker` | ^11.0.2 | Chọn file |
 
