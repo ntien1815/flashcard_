@@ -68,18 +68,4 @@ class Deck {
     };
   }
 
-  // ── Legacy ─────────────────────────────────────────────
-  Map<String, dynamic> toMap() => toFirestore();
-
-  factory Deck.fromMap(Map<String, dynamic> map) {
-    return Deck(
-      id: map['id'],
-      name: map['name'] ?? '',
-      description: map['description'],
-      color: map['color'] ?? '#4CAF50',
-      cardCount: map['cardCount'] ?? 0,
-      isSystem: map['isSystem'] ?? false,
-      createdAt: DateTime.parse(map['createdAt']),
-    );
-  }
 }

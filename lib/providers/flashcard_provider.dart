@@ -1,9 +1,9 @@
 import 'package:flutter/foundation.dart';
 import '../models/flashcard.dart';
-import '../services/firestore_service.dart'; // ← đổi import
+import '../services/firestore_service.dart';
 
 class FlashcardProvider with ChangeNotifier {
-  final FirestoreService _db = FirestoreService(); // ← đổi service
+  final FirestoreService _db = FirestoreService();
 
   List<Flashcard> _flashcards = [];
   List<Flashcard> _dueCards = [];
@@ -15,7 +15,6 @@ class FlashcardProvider with ChangeNotifier {
   int get dueCount => _dueCards.length;
 
   Future<void> loadFlashcards(String deckId) async {
-    // ← String
     _isLoading = true;
     notifyListeners();
 
@@ -31,7 +30,7 @@ class FlashcardProvider with ChangeNotifier {
   }
 
   Future<void> addFlashcard({
-    required String deckId, // ← String
+    required String deckId,
     required String front,
     required String back,
     String? example,
@@ -74,7 +73,6 @@ class FlashcardProvider with ChangeNotifier {
   }
 
   Future<void> deleteFlashcard(String id, String deckId) async {
-    // ← String
     try {
       await _db.deleteFlashcard(id, deckId);
       _flashcards.removeWhere((c) => c.id == id);

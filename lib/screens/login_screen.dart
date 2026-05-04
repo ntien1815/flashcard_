@@ -1,4 +1,4 @@
-﻿import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../services/auth_service.dart';
@@ -273,10 +273,11 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Widget _buildGoogleIcon() {
-    return SizedBox(
+    return Image.asset(
+      'assets/images/google_logo.png',
       width: 20,
       height: 20,
-      child: CustomPaint(painter: _GoogleLogoPainter()),
+      fit: BoxFit.contain,
     );
   }
 
@@ -446,60 +447,4 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
-class _GoogleLogoPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
 
-    final blue = Paint()..color = const Color(0xFF4285F4);
-    final red = Paint()..color = const Color(0xFFEA4335);
-    final yellow = Paint()..color = const Color(0xFFFBBC05);
-    final green = Paint()..color = const Color(0xFF34A853);
-
-    final path = Path();
-
-    canvas.save();
-    canvas.clipPath(Path()..addOval(Rect.fromLTWH(0, 0, w, h)));
-
-    path
-      ..reset()
-      ..moveTo(w * 0.5, h * 0.5)
-      ..arcTo(Rect.fromLTWH(0, 0, w, h), -2.36, 1.57, false)
-      ..close();
-    canvas.drawPath(path, red);
-
-    path
-      ..reset()
-      ..moveTo(w * 0.5, h * 0.5)
-      ..arcTo(Rect.fromLTWH(0, 0, w, h), -0.79, 1.57, false)
-      ..close();
-    canvas.drawPath(path, blue);
-    canvas.drawRect(Rect.fromLTWH(w * 0.5, h * 0.35, w * 0.5, h * 0.3), blue);
-
-    path
-      ..reset()
-      ..moveTo(w * 0.5, h * 0.5)
-      ..arcTo(Rect.fromLTWH(0, 0, w, h), 0.79, 1.57, false)
-      ..close();
-    canvas.drawPath(path, green);
-
-    path
-      ..reset()
-      ..moveTo(w * 0.5, h * 0.5)
-      ..arcTo(Rect.fromLTWH(0, 0, w, h), 2.36, 1.57, false)
-      ..close();
-    canvas.drawPath(path, yellow);
-
-    canvas.drawCircle(
-      Offset(w * 0.5, h * 0.5),
-      w * 0.32,
-      Paint()..color = Colors.white,
-    );
-
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}

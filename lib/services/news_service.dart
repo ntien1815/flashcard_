@@ -71,6 +71,110 @@ class NewsService {
     }
   }
 
+  // ─── Public: tra nghĩa từ đơn ───────────────────────────────────────────────
+  /// Gọi song song 2 API:
+  ///   1. Free Dictionary API (dictionaryapi.dev) → phonetic + định nghĩa EN
+  ///   2. MyMemory API                            → nghĩa tiếng Việt
+  /// Dùng Future.wait để chạy cả 2 cùng lúc, tổng thời gian = max(t1, t2).
+  Future<WordLookupResult?> lookupWord(String word) async {
+    final clean = word.trim().toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
+    if (clean.isEmpty) return null;
+    try {
+      // Chạy cả 2 API đồng thời
+      final results = await Future.wait([
+        _fetchDictionary(clean),  // kết quả [0]: Map<String,dynamic>? hoặc null
+        _myMemoryWord(clean),     // kết quả [1]: String? (tiếng Việt) hoặc null
+      ]);
+
+      final dictEntry = results[0] as Map<String, dynamic>?;
+      final viTranslation = results[1] as String?;
+
+      // Nếu cả 2 đều thất bại → không tìm thấy từ
+      if (dictEntry == null && viTranslation == null) return null;
+
+      // Nếu chỉ có MyMemory (từ không có trong dictionary)
+      if (dictEntry == null) {
+        return WordLookupResult(
+          word: clean,
+          vietnameseMeaning: viTranslation,
+          myMemoryFallback: viTranslation,
+        );
+      }
+
+      // Parse phonetic
+      String phonetic = dictEntry['phonetic'] as String? ?? '';
+      if (phonetic.isEmpty) {
+        final phonetics = (dictEntry['phonetics'] as List?)
+            ?.map((p) => (p as Map)['text'] as String? ?? '')
+            .where((p) => p.isNotEmpty)
+            .toList();
+        phonetic = phonetics?.isNotEmpty == true ? phonetics!.first : '';
+      }
+
+      // Parse meanings (định nghĩa tiếng Anh)
+      final rawMeanings = dictEntry['meanings'] as List? ?? [];
+      final meanings = <WordMeaning>[];
+      for (final m in rawMeanings.take(3)) {
+        final map = m as Map<String, dynamic>;
+        final pos = map['partOfSpeech'] as String? ?? '';
+        final defs = (map['definitions'] as List? ?? [])
+            .take(3)
+            .map((d) => (d as Map<String, dynamic>)['definition'] as String? ?? '')
+            .where((d) => d.isNotEmpty)
+            .toList();
+        if (defs.isNotEmpty) {
+          meanings.add(WordMeaning(partOfSpeech: pos, definitions: defs));
+        }
+      }
+
+      // Merge: dict data + tiếng Việt
+      return WordLookupResult(
+        word: clean,
+        phonetic: phonetic,
+        meanings: meanings,
+        vietnameseMeaning: viTranslation,
+      );
+    } catch (e) {
+      debugPrint('[NewsService] lookupWord error: $e');
+      return null;
+    }
+  }
+
+  /// Gọi Free Dictionary API, trả về raw entry Map hoặc null nếu thất bại.
+  Future<Map<String, dynamic>?> _fetchDictionary(String word) async {
+    try {
+      final uri = Uri.parse(
+        'https://api.dictionaryapi.dev/api/v2/entries/en/$word',
+      );
+      final res = await http.get(uri).timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return null;
+      final list = jsonDecode(res.body) as List<dynamic>;
+      if (list.isEmpty) return null;
+      return list.first as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> _myMemoryWord(String word) async {
+    try {
+      final uri = Uri.parse(
+        'https://api.mymemory.translated.net/get'
+        '?q=${Uri.encodeComponent(word)}'
+        '&langpair=en|vi',
+      );
+      final res = await http.get(uri).timeout(const Duration(seconds: 6));
+      if (res.statusCode != 200) return null;
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      if (data['responseStatus'] == 200) {
+        return data['responseData']?['translatedText'] as String?;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ─── Private: đọc cache Firestore ───────────────────────────────────────────
   Future<List<Article>> _getCachedArticles() async {
     final cutoff = DateTime.now().subtract(const Duration(hours: _cacheHours));
@@ -134,4 +238,34 @@ class NewsService {
     await batch.commit();
     debugPrint('[NewsService] đã cache ${articles.length} bài vào Firestore');
   }
+}
+
+// ─── Data models cho tra từ ──────────────────────────────────────────────────
+class WordMeaning {
+  final String partOfSpeech;
+  final List<String> definitions;
+  const WordMeaning({required this.partOfSpeech, required this.definitions});
+}
+
+class WordLookupResult {
+  final String word;
+  final String phonetic;
+  final List<WordMeaning> meanings;
+
+  /// Nghĩa tiếng Việt từ MyMemory API — luôn được điền nếu API trả về thành công.
+  /// Ví dụ: "executive" → "giám đốc điều hành"
+  final String? vietnameseMeaning;
+
+  /// Chỉ set khi Dictionary API không có từ (fallback thuần MyMemory).
+  final String? myMemoryFallback;
+
+  const WordLookupResult({
+    required this.word,
+    this.phonetic = '',
+    this.meanings = const [],
+    this.vietnameseMeaning,
+    this.myMemoryFallback,
+  });
+
+  bool get hasDictData => meanings.isNotEmpty;
 }

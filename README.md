@@ -4,6 +4,12 @@
 
 ---
 
+## Cập nhật gần đây (Recent Updates)
+- Tối ưu hoá mã nguồn, loại bỏ các hàm `legacy` không còn sử dụng.
+- Dọn dẹp code thừa trong các class Model và Provider để đảm bảo tính gọn nhẹ, duy trì độ ổn định.
+
+---
+
 ## Tính năng chính
 
 ### Xác thực

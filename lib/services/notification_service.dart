@@ -13,33 +13,61 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
   bool _initialized = false;
 
+  // ─── Khởi tạo ──────────────────────────────────────────────────────────────
+
+  /// Gọi một lần duy nhất trong main() trước runApp().
   Future<void> init() async {
     if (_initialized) return;
 
     tz.initializeTimeZones();
     tz.setLocalLocation(tz.getLocation('Asia/Ho_Chi_Minh'));
 
-    const androidSettings = AndroidInitializationSettings(
-      '@mipmap/ic_launcher',
-    );
+    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
 
     await _plugin.initialize(
       settings: const InitializationSettings(android: androidSettings),
     );
     _initialized = true;
-    debugPrint('✅ NotificationService initialized');
+    debugPrint('[NotificationService] initialized');
 
+    // Khôi phục lịch nếu user đã bật trước đó (ví dụ sau khi restart app)
     final prefs = await SharedPreferences.getInstance();
-    final enabled = prefs.getBool('notif_enabled') ?? false;
-    if (enabled) {
+    if (prefs.getBool('notif_enabled') ?? false) {
       final hour = prefs.getInt('notif_hour') ?? 20;
       final minute = prefs.getInt('notif_minute') ?? 0;
       await scheduleDailyReminder(hour, minute);
     }
   }
 
-  Future<void> scheduleDailyReminder(int hour, int minute) async {
+  // ─── Request permission (Android 13+) ──────────────────────────────────────
+
+  /// Yêu cầu quyền POST_NOTIFICATIONS ở runtime.
+  /// Trả về true nếu đã được cấp (hoặc thiết bị < API 33).
+  Future<bool> requestPermission() async {
+    final android = _plugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    if (android == null) return true;
+
+    // requestNotificationsPermission() có sẵn từ flutter_local_notifications ^14
+    final granted = await android.requestNotificationsPermission();
+    return granted ?? false;
+  }
+
+  // ─── Lên lịch nhắc hàng ngày ───────────────────────────────────────────────
+
+  /// Lên lịch một notification lặp hàng ngày vào [hour]:[minute].
+  /// Tự động request permission nếu chưa có.
+  /// Trả về true nếu thành công.
+  Future<bool> scheduleDailyReminder(int hour, int minute) async {
     try {
+      // Kiểm tra / xin permission trước
+      final hasPermission = await requestPermission();
+      if (!hasPermission) {
+        debugPrint('[NotificationService] permission denied');
+        return false;
+      }
+
       await _plugin.cancelAll();
 
       const androidDetails = AndroidNotificationDetails(
@@ -51,15 +79,14 @@ class NotificationService {
         icon: '@mipmap/ic_launcher',
       );
 
-      final scheduledTime = _nextInstanceOfTime(hour, minute);
-
       await _plugin.zonedSchedule(
         id: 0,
         title: 'Đến giờ ôn tập rồi! 📚',
         body: 'Hãy dành vài phút để ôn flashcard nhé!',
-        scheduledDate: scheduledTime,
+        scheduledDate: _nextInstanceOfTime(hour, minute),
         notificationDetails: const NotificationDetails(android: androidDetails),
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        // exactAllowWhileIdle đảm bảo thông báo đúng giờ kể cả khi màn hình tắt
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         matchDateTimeComponents: DateTimeComponents.time,
       );
 
@@ -69,12 +96,44 @@ class NotificationService {
       await prefs.setInt('notif_minute', minute);
 
       debugPrint(
-        '✅ Daily reminder scheduled at $hour:${minute.toString().padLeft(2, '0')}',
+        '[NotificationService] scheduled at $hour:${minute.toString().padLeft(2, '0')}',
       );
+      return true;
     } catch (e) {
-      debugPrint('❌ scheduleDailyReminder error: $e');
+      debugPrint('[NotificationService] scheduleDailyReminder error: $e');
+      return false;
     }
   }
+
+  // ─── Hủy tất cả ────────────────────────────────────────────────────────────
+
+  Future<void> cancelAll() async {
+    try {
+      await _plugin.cancelAll();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('notif_enabled', false);
+      debugPrint('[NotificationService] cancelled');
+    } catch (e) {
+      debugPrint('[NotificationService] cancelAll error: $e');
+    }
+  }
+
+  // ─── Getters trạng thái ─────────────────────────────────────────────────────
+
+  Future<bool> isEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('notif_enabled') ?? false;
+  }
+
+  Future<TimeOfDay> getReminderTime() async {
+    final prefs = await SharedPreferences.getInstance();
+    return TimeOfDay(
+      hour: prefs.getInt('notif_hour') ?? 20,
+      minute: prefs.getInt('notif_minute') ?? 0,
+    );
+  }
+
+  // ─── Helper ─────────────────────────────────────────────────────────────────
 
   tz.TZDateTime _nextInstanceOfTime(int hour, int minute) {
     final now = tz.TZDateTime.now(tz.local);
@@ -86,32 +145,10 @@ class NotificationService {
       hour,
       minute,
     );
+    // Nếu giờ đã qua hôm nay → lên lịch cho ngày mai
     if (scheduled.isBefore(now)) {
       scheduled = scheduled.add(const Duration(days: 1));
     }
     return scheduled;
-  }
-
-  Future<void> cancelAll() async {
-    try {
-      await _plugin.cancelAll();
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('notif_enabled', false);
-      debugPrint('✅ Notifications cancelled');
-    } catch (e) {
-      debugPrint('❌ cancelAll error: $e');
-    }
-  }
-
-  Future<bool> isEnabled() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('notif_enabled') ?? false;
-  }
-
-  Future<TimeOfDay> getReminderTime() async {
-    final prefs = await SharedPreferences.getInstance();
-    final hour = prefs.getInt('notif_hour') ?? 20;
-    final minute = prefs.getInt('notif_minute') ?? 0;
-    return TimeOfDay(hour: hour, minute: minute);
   }
 }

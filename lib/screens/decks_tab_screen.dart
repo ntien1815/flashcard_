@@ -1027,7 +1027,6 @@ class _AddFromLibrarySheetState extends State<_AddFromLibrarySheet> {
     );
   }
 
-  // List từ đã có trong targetDeck (để xóa)
   Widget _buildManageList(ScrollController scrollController) {
     final c = _c;
     if (_existingCards.isEmpty) {

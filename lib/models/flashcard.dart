@@ -108,6 +108,4 @@ class Flashcard {
     };
   }
 
-  // ── Legacy ─────────────────────────────────────────────
-  Map<String, dynamic> toMap() => toFirestore();
 }

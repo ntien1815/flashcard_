@@ -3,7 +3,7 @@ import '../models/deck.dart';
 import '../services/firestore_service.dart';
 
 class DeckProvider with ChangeNotifier {
-  final FirestoreService _db = FirestoreService(); // ← đổi service
+  final FirestoreService _db = FirestoreService();
 
   List<Deck> _decks = [];
   bool _isLoading = false;
@@ -57,7 +57,6 @@ class DeckProvider with ChangeNotifier {
   }
 
   Future<void> deleteDeck(String id) async {
-    // ← String
     try {
       await _db.deleteDeck(id);
       _decks.removeWhere((d) => d.id == id);

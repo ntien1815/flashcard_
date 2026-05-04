@@ -1214,7 +1214,22 @@ class _NotificationSettingsSheetState
   Future<void> _toggleEnabled(bool value) async {
     setState(() => _enabled = value);
     if (value) {
-      await widget.notifService.scheduleDailyReminder(_time.hour, _time.minute);
+      final ok = await widget.notifService.scheduleDailyReminder(
+        _time.hour,
+        _time.minute,
+      );
+      // Nếu permission bị từ chối → revert switch và báo user
+      if (!ok && mounted) {
+        setState(() => _enabled = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Vui lòng cấp quyền thông báo trong Cài đặt ứng dụng.',
+            ),
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
     } else {
       await widget.notifService.cancelAll();
     }

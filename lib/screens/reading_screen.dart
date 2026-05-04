@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import '../models/article_model.dart';
 import '../services/news_service.dart';
 import '../theme/app_colors.dart';
@@ -229,11 +231,24 @@ class _ArticleDetailScreen extends StatelessWidget {
   final Article article;
   const _ArticleDetailScreen({required this.article});
 
+  /// Cắt phần bị GNews truncate: "...some text [1234 chars]" → "...some text"
+  String _cleanContent(String text) {
+    final idx = text.indexOf('[');
+    if (idx > 0) return text.substring(0, idx).trim();
+    return text.trim();
+  }
+
   List<String> _splitParagraphs(String text) {
-    final parts = text.split(RegExp(r'\n+'));
+    // 1. Cắt phần GNews truncate trước
+    final cleaned = _cleanContent(text);
+
+    // 2. Thử tách theo dòng trống
+    final parts = cleaned.split(RegExp(r'\n+'));
     final result = parts.where((p) => p.trim().length > 30).toList();
-    if (result.length <= 1) return _splitBySentence(text);
-    return result;
+    if (result.length > 1) return result;
+
+    // 3. Fallback: tách theo câu, nhóm 3 câu/đoạn
+    return _splitBySentence(cleaned);
   }
 
   List<String> _splitBySentence(String text) {
@@ -412,8 +427,46 @@ class _ParagraphCardState extends State<_ParagraphCard> {
   bool _loadingTranslation = false;
   bool _showTranslation = false;
 
+  // ── TTS ──────────────────────────────────────────────────────────────────────
+  final FlutterTts _tts = FlutterTts();
+  bool _isSpeaking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _tts.setLanguage('en-US');
+    _tts.setSpeechRate(0.45);
+    _tts.setVolume(1.0);
+    _tts.setPitch(1.0);
+    // Khi TTS đọc xong thì đổi icon về trạng thái ban đầu
+    _tts.setCompletionHandler(() {
+      if (mounted) setState(() => _isSpeaking = false);
+    });
+    _tts.setCancelHandler(() {
+      if (mounted) setState(() => _isSpeaking = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _tts.stop();
+    super.dispose();
+  }
+
+  Future<void> _toggleSpeak() async {
+    if (_isSpeaking) {
+      // Đang đọc → dừng lại
+      await _tts.stop();
+      if (mounted) setState(() => _isSpeaking = false);
+    } else {
+      // Chưa đọc → bắt đầu đọc
+      if (mounted) setState(() => _isSpeaking = true);
+      await _tts.speak(widget.text);
+    }
+  }
+
   Future<void> _translate() async {
-    // Đã có bản dịch rồi → chỉ toggle ẩn/hiện, không gọi API lại
+    // Đã có bản dịch → chỉ toggle ẩn/hiện, không gọi API lại
     if (_translation != null) {
       setState(() => _showTranslation = !_showTranslation);
       return;
@@ -453,6 +506,7 @@ class _ParagraphCardState extends State<_ParagraphCard> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ── Số đoạn ──
               Container(
                 width: 22,
                 height: 22,
@@ -472,14 +526,25 @@ class _ParagraphCardState extends State<_ParagraphCard> {
                 ),
               ),
               const SizedBox(width: 8),
+              // ── Nội dung đoạn (từng từ có thể nhấn) ──
               Expanded(
-                child: Text(
-                  widget.text,
+                child: _TappableText(
+                  text: widget.text,
                   style: TextStyle(
                     fontSize: 14,
                     color: c.textPrimary,
                     height: 1.55,
                   ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              // ── Nút loa TTS ──
+              GestureDetector(
+                onTap: _toggleSpeak,
+                child: Icon(
+                  Icons.volume_up_rounded,
+                  size: 20,
+                  color: _isSpeaking ? c.primary : c.textTertiary,
                 ),
               ),
             ],
@@ -549,6 +614,305 @@ class _ParagraphCardState extends State<_ParagraphCard> {
                     ),
                   ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Tappable Text (từng từ có thể nhấn để tra nghĩa) ───────────────────────
+class _TappableText extends StatelessWidget {
+  final String text;
+  final TextStyle style;
+  const _TappableText({required this.text, required this.style});
+
+  void _onWordTap(BuildContext context, String word) {
+    final clean = word.replaceAll(RegExp(r"[^a-zA-Z'-]"), '');
+    if (clean.length < 2) return;
+    HapticFeedback.selectionClick();
+    _WordLookupSheet.show(context, clean);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Tách thành các token giữ nguyên khoảng trắng/dấu câu
+    final tokens = text.split(RegExp(r'(?<=\s)|(?=\s)'));
+    return Text.rich(
+      TextSpan(
+        children: tokens.map((token) {
+          final isWord = RegExp(r"[a-zA-Z]").hasMatch(token);
+          if (!isWord) return TextSpan(text: token, style: style);
+          return WidgetSpan(
+            alignment: PlaceholderAlignment.baseline,
+            baseline: TextBaseline.alphabetic,
+            child: GestureDetector(
+              onTap: () => _onWordTap(context, token),
+              child: Text(token, style: style),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+// ─── Word Lookup Bottom Sheet ─────────────────────────────────────────────────
+class _WordLookupSheet extends StatefulWidget {
+  final String word;
+  const _WordLookupSheet({required this.word});
+
+  static void show(BuildContext context, String word) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _WordLookupSheet(word: word),
+    );
+  }
+
+  @override
+  State<_WordLookupSheet> createState() => _WordLookupSheetState();
+}
+
+class _WordLookupSheetState extends State<_WordLookupSheet> {
+  WordLookupResult? _result;
+  bool _loading = true;
+  bool _notFound = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _lookup();
+  }
+
+  Future<void> _lookup() async {
+    final result = await NewsService().lookupWord(widget.word);
+    if (mounted) {
+      setState(() {
+        _result = result;
+        _loading = false;
+        _notFound = result == null;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AppColors.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Handle bar
+          Center(
+            child: Container(
+              margin: const EdgeInsets.only(top: 12, bottom: 16),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: c.border,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          if (_loading) _buildLoading(c),
+          if (_notFound) _buildNotFound(c),
+          if (!_loading && !_notFound && _result != null) _buildResult(c),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoading(AppColors c) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 32),
+        child: Center(
+          child: Column(
+            children: [
+              CircularProgressIndicator(color: c.primary, strokeWidth: 2),
+              const SizedBox(height: 12),
+              Text(
+                'Đang tra từ "${widget.word}"...',
+                style: TextStyle(fontSize: 13, color: c.textSecondary),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  Widget _buildNotFound(AppColors c) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Center(
+          child: Column(
+            children: [
+              Icon(Icons.search_off_rounded, size: 40, color: c.textTertiary),
+              const SizedBox(height: 8),
+              Text(
+                'Không tìm thấy từ "${widget.word}"',
+                style: TextStyle(fontSize: 14, color: c.textSecondary),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+
+  Widget _buildResult(AppColors c) {
+    final r = _result!;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Word + phonetic
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                r.word,
+                style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w700,
+                  color: c.textPrimary,
+                  height: 1.1,
+                ),
+              ),
+              const SizedBox(width: 10),
+              if (r.phonetic.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 3),
+                  child: Text(
+                    r.phonetic,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: c.textTertiary,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          // ── Nghĩa tiếng Việt (hiện khi MyMemory thành công) ──
+          if (r.vietnameseMeaning != null) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: c.tealBg,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.translate_rounded, size: 13, color: c.teal),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      r.vietnameseMeaning!,
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: c.teal,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          // ── Fallback (MyMemory only, không có dict data) ──
+          if (!r.hasDictData && r.myMemoryFallback != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: c.primaryBg,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                r.myMemoryFallback!,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: c.primary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+          // ── Định nghĩa tiếng Anh ──
+          if (r.hasDictData) ...[
+            const SizedBox(height: 14),
+            ...r.meanings.map((m) => _buildMeaning(c, m)),
+          ],
+          const SizedBox(height: 4),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMeaning(AppColors c, WordMeaning m) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Part of speech tag
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: c.primaryBg,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              m.partOfSpeech,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: c.primary,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          // Definitions
+          ...m.definitions.asMap().entries.map(
+            (e) => Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${e.key + 1}. ',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: c.textTertiary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      e.value,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: c.textSecondary,
+                        height: 1.5,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Divider(color: c.border.withValues(alpha: 0.4), height: 1),
         ],
       ),
     );
