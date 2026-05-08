@@ -17,6 +17,7 @@
 - **Nhập giọng nói** (Speech-to-Text) để luyện phát âm
 - **Đọc to** (Text-to-Speech) để luyện nghe
 - Đánh giá độ khó (0-5) ảnh hưởng đến lịch ôn tập
+- Hiển thị tỉ lệ chính xác sau mỗi phiên học
 
 ### Quản lý Deck
 - Tạo deck tùy chỉnh (tên, mô tả, màu sắc)

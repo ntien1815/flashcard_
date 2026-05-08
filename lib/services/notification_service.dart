@@ -39,10 +39,10 @@ class NotificationService {
     }
   }
 
-  // ─── Request permission (Android 13+) ──────────────────────────────────────
+  // ─── Request permission ────────────────────────────────────────────────────
 
   /// Yêu cầu quyền POST_NOTIFICATIONS ở runtime.
-  /// Trả về true nếu đã được cấp (hoặc thiết bị < API 33).
+  /// Trả về true nếu đã được cấp.
   Future<bool> requestPermission() async {
     final android = _plugin
         .resolvePlatformSpecificImplementation<

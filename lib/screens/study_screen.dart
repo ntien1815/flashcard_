@@ -1557,10 +1557,42 @@ class _StudyScreenState extends State<StudyScreen>
             ),
             const SizedBox(height: 8),
             Text(
-              'Bạn đã đạt $_maxScore điểm và hoàn thành\nbài học ${_sessionCards.length} từ.',
+              'Bạn đã ôn ${_sessionCards.length} từ trong phiên này.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 14, color: c.textSecondary),
             ),
+            const SizedBox(height: 20),
+            Builder(builder: (_) {
+              final total = _pendingResults.length;
+              final correct = _pendingResults.where((r) => r.log.isCorrect).length;
+              final pct = total == 0 ? 0 : (correct * 100 ~/ total);
+              final color = pct >= 80 ? c.teal : pct >= 60 ? c.amber : c.coral;
+              final bg = pct >= 80 ? c.tealBg : pct >= 60 ? c.amberBg : c.coralBg;
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                decoration: BoxDecoration(
+                  color: bg,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      '$pct%',
+                      style: TextStyle(
+                        fontSize: 36,
+                        fontWeight: FontWeight.w700,
+                        color: color,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Tỉ lệ chính xác',
+                      style: TextStyle(fontSize: 12, color: color),
+                    ),
+                  ],
+                ),
+              );
+            }),
             const SizedBox(height: 32),
             SizedBox(
               width: 200,
